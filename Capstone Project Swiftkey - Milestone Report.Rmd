@@ -1,0 +1,192 @@
+---
+title: "Capstone Project Swiftkey - Milestone Report"
+author: "Inderlal Chettri"
+date: "March 19, 2016"
+output: html_document
+---
+
+# Introduction
+
+Typing on mobile devices is difficult given their small form factor. Swiftkey has developed a smart software keyboard to reduce the difficulty and increase the typing speed on mobile keyboards. One of the techniques used is predictive text modelling and the objective of this course is to develop a app which will use predictive text analytics to come up with word options given a input phrase.
+
+The objective of this report is to  
+
+1. Demonstrate the data has been downloaded and successfully loaded in R.  
+2. Create a basic report of summary statistics about the data sets.  
+3. Report any interesting findings.  
+4. Map next steps and get feedback for creating a prediction algorithm and Shiny app.  
+
+### Please skip directly to Section 2.b. Report Analysis and Statistics if you are not interested in the code for getting the data and cleaning it.
+
+
+
+# 1. Loading the data
+
+Loading in the libraries used for this assignment
+```{r, message=FALSE, warning=FALSE}
+library(data.table)
+library(tm)
+library(SnowballC)
+library(wordcloud)
+```
+
+The link to the data to be used for this assignment is provided.
+
+```{r}
+setwd("~/R/Coursera/Capstone")                                      # Set the working folder for the assignment
+list.filesDownloadURL <- "https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip"                                                                         #The link to the file to be downloaded.
+Zipfile <- "./Coursera-SwiftKey.zip"                                # The downloaded file
+
+if(length(list.files(pattern="Coursera-SwiftKey.zip"))==0){         # To prevent multiple downloads
+  download.file(DownloadURL,Zipfile, cacheOK = TRUE)                # Download the file
+  unzip(Zipfile, files = NULL, list = FALSE, overwrite = TRUE,junkpaths = FALSE, exdir = ".", unzip = "internal", setTimes = FALSE)                                                # Unzip the file
+}
+
+rm(list.filesDownloadURL, Zipfile)                                  # Remove variables no longer required.
+```
+
+Examining the unzipped directory "final", we see the english language files are in "./final/en_US/". 
+```{r}
+list.files("final", recursive = TRUE, pattern = "^en")
+```
+Three text files, named news, blogs and twitter, have been provided for this assignment.
+
+
+We will now load the files into R data tables for blogs, news and twitter.
+
+```{r, eval=TRUE, cache=TRUE}
+blog <- fread("./final/en_US/en_US.blogs.txt", header = FALSE, sep="\n", stringsAsFactors = FALSE, encoding="UTF-8", showProgress = FALSE)
+
+news <- fread("./final/en_US/en_US.news.txt", header = FALSE, sep="\n", stringsAsFactors = FALSE, encoding="UTF-8", showProgress = FALSE)
+
+twitter <- read.table("./final/en_US/en_US.twitter.txt", header = FALSE, sep="\n", quote = "", stringsAsFactors = FALSE,  encoding="UTF-8", skipNul = TRUE)              # Used a different method to load the data because of special characters present in the data.
+twitter <- data.table:::as.data.table.list(twitter)
+```
+# 2.a. Clean and Analyze Data
+
+Evaluating high level statistics of the files that were loaded
+```{r}
+data.table("File Name |" = c("blog", "news", "twitter"), "No of Lines |" = c(dim(blog)[1], dim(news)[1], dim(twitter)[1]), "File Size (Mb)" = c(object.size(blog), object.size(news), object.size(twitter))/2^20)
+```
+
+Given the size of the data sets, decided to process each of these individually. The process involved the following steps:
+
+1. Create a corpus.    
+2. Clean the data.  
+3. Create a Term Document Matrix.
+
+This was done for each data set - blog, news, twitter. Taking blog as an example
+
+```{r, eval=FALSE}
+b <- VCorpus(VectorSource(blog), readerControl=list(language="english"))       # Create Corpus
+b <- tm_map(b, content_transformer(function(x) iconv(x, from = "UTF-8", to="ASCII", sub=""))) #Convert to ASCII
+b <- tm_map(b, content_transformer(function(x) gsub("[Hh][Tt][Tt][Pp][[:alnum:][:punct:]]*", "", x)))                                                                                         # Remove links
+b <- tm_map(b, content_transformer(tolower))                                   # Convert to lower case
+b <- tm_map(b, content_transformer(removePunctuation))                         # Remove punctuation marks
+b <- tm_map(b, content_transformer(removeNumbers))                             # Remove numbers
+b <- tm_map(b, content_transformer(stripWhitespace))                           # Remove White spaces
+b <- tm_map(b, content_transformer(function(x) gsub("^[[:space:]]","", x)))    # Remove beginning space
+b <- tm_map(b, content_transformer(function(x) gsub("[[:space:]]$","", x)))    # Remove ending space
+b <- tm_map(b, PlainTextDocument)                                              # Convert to Plain Text document
+save(b, file = "./data/twitter_b.RData" )                                      # Data saved to hard drive
+tdm <- TermDocumentMatrix(b)                                                   # Create a Term Document Matrix
+save(tdm, file = "./data/twitter_tdm.RData" )                                  # tdm saved to hard drive
+```
+
+Now, we reload each of the tdms and convert them to a sorted data table using the function TDMtoDT().
+```{r}
+TDMtoDT <- function(inputtdm){
+  m <- as.matrix(inputtdm)
+  m <- data.table(cbind("Word"=rownames(m),"Freq"=as.numeric(m)), keep.rownames = FALSE)
+  m$Freq <- as.numeric(m$Freq)
+  m <- m[order(Freq,decreasing=TRUE)]
+}
+
+load("./data/twitter_tdm.RData")
+twitter_DT <- TDMtoDT(tdm)
+rm(tdm)
+
+load("./data/blog_tdm.RData")
+blog_DT <- TDMtoDT(tdm)
+rm(tdm)
+
+load("./data/news_tdm.RData")
+news_DT <- TDMtoDT(tdm)
+rm(tdm)
+```
+#2.b. Report Analysis and Statistics
+
+Looking at some of the statistics of the processed data sets
+
+```{r}
+data.table("File Name |" = c("blog_DT", "news_DT", "twitter_DT"), "No of Unique Words |" = c(dim(blog_DT)[1], dim(news_DT)[1], dim(twitter_DT)[1]), "Total No of Words |" = c(sum(blog_DT$Freq), sum(news_DT$Freq), sum(twitter_DT$Freq)), "File Size (Mb)" = c(object.size(blog_DT), object.size(news_DT), object.size(twitter_DT))/2^20)
+```
+
+The top 10 most frequently occurring words in the three data tables are as follows
+```{r}
+data.table("Blogs" = head(blog_DT,10), "News" = head(news_DT,10), "Twitter" = head(twitter_DT,10))
+```
+And plotting the wordclouds for the datasets
+
+For Blogs:
+```{r}
+wordcloud(blog_DT$Word[1:100], blog_DT$Freq[1:100], scale=c(5,1), max.words=100, random.order=FALSE, rot.per=0.35, use.r.layout=FALSE, colors=brewer.pal(8, "Dark2"))
+```
+
+
+For News:
+```{r}
+wordcloud(news_DT$Word[1:100], news_DT$Freq[1:100], scale=c(5,1), max.words=100, random.order=FALSE, rot.per=0.35, use.r.layout=FALSE, colors=brewer.pal(8, "Dark2"))
+```
+
+
+For Twitter:
+```{r}
+wordcloud(twitter_DT$Word[1:100], twitter_DT$Freq[1:100], scale=c(5,1), max.words=100, random.order=FALSE, rot.per=0.35, use.r.layout=FALSE, colors=brewer.pal(8, "Dark2"))
+```
+
+Plotting the frequency of occurances for words in each data set
+```{r}
+options(scipen=10000)
+plot(log(blog_DT$Freq), type = "l", col = "black", xlim = c(0,410000), xlab="No of Words",ylab="Log of Frequency",main="Word Occurance Frequency (Blogs: Black, News: Blue, Twitter: Red) ")
+lines(log(news_DT$Freq), col="blue")
+lines(log(twitter_DT$Freq), col="red")
+```
+
+
+Integrating the tree data sets and plotting the graph and word cloud
+```{r}
+Combine_DT <- merge(news_DT, blog_DT, by = "Word", all = TRUE)
+Combine_DT <- merge(Combine_DT, twitter_DT, by = "Word", all = TRUE)
+Combine_DT<- Combine_DT[ ,sum := rowSums( .SD, na.rm = TRUE), .SDcols = c("Freq.x", "Freq.y", "Freq")]
+Combine_DT[ ,grep("Freq", colnames(Combine_DT)):=NULL]
+Combine_DT <- Combine_DT[order(sum,decreasing=TRUE)]
+
+wordcloud(Combine_DT$Word[1:100], Combine_DT$sum[1:100], scale=c(5,1), max.words=100, random.order=FALSE, rot.per=0.35, use.r.layout=FALSE, colors=brewer.pal(8, "Dark2"))
+
+plot(log(Combine_DT$sum), type = "l", col = "black", xlim = c(0,410000), xlab="No of Words",ylab="Log of Frequency",main="Word Occurance Frequency")
+```
+
+  
+Looking at the data, it is clear that there will be a minimal loss of accuracy by taking just a small subset of the data to build the word prediction application. We should be able to proceed ahead by taking a random 10% sample of the data.
+
+
+# 3. Interesting Findings
+
+Looking at the analysis, we note that there is a great amount of similarity across the three data sets
+
+1. "the" and "and" are the most common words across all three.
+2. Lots of words are common in the top and the bottom of the tables
+3. There are lots of words that are very frequently used and lots of words used very infrequently. And we see the same pattern in all three data sets.
+4. We had 1114064 unique words in 3 data sets (Blog: 395555; News: 309781; Twitter: 408728). The combined data set has only 837872, a shrinkage of 33% due to common words.
+
+
+# 4. Going Forward
+
+1. I am planning to use a 10% random sample for the rest of the project. Will use that to build the algorithms and compute the n-grams. 
+2. Review different models including Katz back-off, Kneser-Ney, etc.
+3. Build the algorithm for predicting the next word
+4. Build a Shiny app
+5. Build presentation
+
+
